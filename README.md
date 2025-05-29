@@ -1,1 +1,1 @@
-# Transcriptome_project_salmon
+Transcriptome Project (Salmon_alignment bash script)
