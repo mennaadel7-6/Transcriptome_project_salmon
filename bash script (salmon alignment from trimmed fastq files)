@@ -1,0 +1,165 @@
+
+#!/bin/bash
+
+###########################################################################################################
+# Human mRNA pseudoalignment using Salmon script
+# Prepared by: Menatallah Adel Abdelmagid
+# Date: 18/2/2025
+# Last Modified Date: 20/2/2025
+# Running Under: macOS terminal(MacBook Pro with Apple M3 Max chip)
+##################################################################
+#
+# About script:
+#=============
+# This script uses Salmon for transcriptome quantification. 
+# The script takes trimmed FASTQ files as input and outputs 
+# quantification of  results into separate directories for each sample.
+# Additionally, a count matrix TSV file is generated for downstream analysis (e.g., with DESeq2 in R).
+#
+# Steps:
+#=======
+# Step 1: Install Salmon (if not installed)
+# Step 2: Ask user for input directories and files
+# Step 3: Check if Salmon index exists, otherwise create one
+# Step 4: Loop over each sample and run Salmon quantification
+# Step 5: Generate a count matrix  .tsv file
+# Step 6: Final message
+#
+#Important Variables used
+#========================
+
+#output_dir="./salmon_output" 
+#
+#variables used to create count matrix
+#..................................
+#
+# sample_output_dir="$output_dir/$sample    #note: $sample is from the command for sample in "${SAMPLES[@]}"
+#
+#quant_file="$sample_output_dir/salmon_output/quant.sf"  # Path to quant.sf file    
+#  # example: for sample SRR23199449 is:  $quant_file   ./salmon_output/SRR23199449/salmon_output/quant.sf
+#
+#
+
+#######################################################################################################
+
+# Activate Conda Environment 
+# conda activate egcb
+
+
+
+# Step 1: Install Salmon (if not already installed
+#=================================================)
+if ! command -v salmon &> /dev/null
+then
+    echo "Salmon is not installed. Installing Salmon..."
+
+    # Install Homebrew if it's not already installed
+    if ! command -v brew &> /dev/null
+    then
+        echo "Homebrew not found, installing..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
+
+    # Install Salmon via Homebrew
+    brew tap brewsci/bio
+    brew install salmon
+
+    # Verify Salmon installation
+    salmon --version
+else
+    echo "Salmon is already installed."
+fi
+
+
+
+# Step 2: Ask User for Input Directories and Files
+#=================================================
+echo "Please enter the directory for processed samples (default: ./processed_samples):"
+read output_dir
+output_dir=${output_dir:-"./processed_samples"}  # Default to './processed_samples' if no input
+
+echo "Please enter the path to your transcriptome index (default: ./salmon_index):"
+read human_index
+human_index=${human_index:-"./salmon_index"}  # Default to './salmon_index' if no input
+
+# Ask for SRA sample IDs to process
+echo "Please enter the sample IDs separated by spaces (e.g., Sample1 Sample2):"
+read -a SAMPLES
+
+
+
+# Step 3: Check if Salmon Index Exists, Otherwise Create One
+#===========================================================
+if [ ! -d "$human_index" ]; then
+    echo "Salmon index not found. Creating the index..."
+
+    # Download Human cDNA FASTA File (Ensembl GRCh38 version)
+    wget ftp://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz
+
+    # Unzip the FASTA file
+    gunzip Homo_sapiens.GRCh38.cdna.all.fa.gz
+
+    # Create Salmon Index
+    salmon index -t Homo_sapiens.GRCh38.cdna.all.fa -i "$human_index" --threads 8
+
+    # Verify if index is created
+    if [ -d "$human_index" ]; then
+        echo "Salmon index created successfully!"
+    else
+        echo "Error: Salmon index creation failed."
+        exit 1  # Exit if index creation fails
+    fi
+else
+    echo "Salmon index already exists at $human_index."
+fi
+
+
+
+# Step 4: Loop Over Each Sample and Process
+#==========================================
+# Loop over each sample, process the trimmed FASTQ files, and run Salmon
+
+# Define the output directory
+output_dir="./salmon_output"  # Directory to store Salmon output
+human_index="salmon_index"  # Define your Salmon index here  
+
+
+
+
+##### Quantify gene expression for each sample using Salmon
+
+
+# Loop over each sample and run Salmon if quant.sf is missing
+for sample in "${SAMPLES[@]}"; do
+    sample_output_dir="$output_dir/$sample"   # Output directory for each sample
+    quant_file="$sample_output_dir/salmon_output/quant.sf"
+    
+    # Check if the quant.sf file exists for the current sample
+    if [ ! -f "$quant_file" ]; then
+        echo "Quant.sf file not found for $sample. Running Salmon quant..."
+        
+        # Define the input directory for each sample (trimmed FASTQ files)
+        sample_input_dir="./trimmed_fastq_files"  # Folder containing the trimmed FASTQ files
+        
+        # Create output directory if it doesn't exist
+        mkdir -p "$sample_output_dir"  
+        
+        # Run Salmon for gene expression quantification
+        salmon quant -i "$human_index" -l A -1 "$sample_input_dir/${sample}_R1_trimmed.fq" -2 "$sample_input_dir/${sample}_R2_trimmed.fq" -o "$sample_output_dir/salmon_output"
+        
+    else
+        echo "Quant.sf file already exists for $sample. Skipping Salmon quant."
+    fi
+done
+
+
+# Step 5: Generate a Count Matrix TSV File
+#========================================================================================================
+
+#move to salmon_output folder with SRR folders inside
+cd /Users/mennaadel/downloads/transcriptome_final_project/salmon_output
+
+echo "salmon quantmerge will choose TPM from quant.sf files to create count 
+#matrix. TPM is column 4 in quant.sf files as seen in head of quant.sf file
+
+salmon quantmerge --quants SRR*/salmon_output --names SRR* --column TPM -o merged_tpm.tsv
